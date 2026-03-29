@@ -1,7 +1,8 @@
 export default function handler(req, res) {
   res.status(200).json({
-    API_URL: process.env.API_URL,
+    APP_NAME: process.env.APP_NAME,
     REFRESH_INTERVAL: Number(process.env.REFRESH_INTERVAL || 30000),
-    APP_NAME: process.env.APP_NAME || "Status Dashboard"
+    ALERT_THRESHOLD_MS: Number(process.env.ALERT_THRESHOLD_MS || 1000),
+    SERVICES: JSON.parse(process.env.SERVICES || "[]")
   });
 }
