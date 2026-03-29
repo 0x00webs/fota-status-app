@@ -1,74 +1,51 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Status Dashboard</title>
+<meta charset="UTF-8" />
+<title>Status Dashboard</title>
 
-  <!-- Tailwind -->
-  <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 
-  <!-- Vue 3 -->
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 </head>
 
 <body class="bg-slate-900 text-white">
 
-<div id="app" class="min-h-screen flex items-center justify-center p-6">
+<div id="app" class="p-6">
 
-  <div class="bg-slate-800 rounded-2xl shadow-xl p-6 w-full max-w-md">
+<h1 class="text-3xl font-bold text-center mb-6">
+🚀 {{ config.APP_NAME }}
+</h1>
 
-    <h1 class="text-2xl font-bold text-center mb-4">
-      🚀 {{ config.APP_NAME || "Loading..." }}
-    </h1>
+<!-- GRID -->
+<div class="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
 
-    <div class="text-center mb-6">
-      <span class="text-3xl font-bold" :class="statusColor">
-        {{ statusText }}
-      </span>
-    </div>
+<div v-for="svc in services" :key="svc.name"
+     class="bg-slate-800 p-5 rounded-2xl shadow">
 
-    <div v-if="data" class="space-y-2 text-sm">
+  <h2 class="text-xl font-semibold mb-2">{{ svc.name }}</h2>
 
-      <div class="flex justify-between">
-        <span>Uptime</span>
-        <span>{{ data.uptime_sec }}s</span>
-      </div>
-
-      <div class="flex justify-between">
-        <span>Database</span>
-        <span>{{ data.database }}</span>
-      </div>
-
-      <div class="flex justify-between">
-        <span>Memory</span>
-        <span>{{ data.memory?.rss_mb }} MB</span>
-      </div>
-
-      <div class="flex justify-between" v-if="data.checks?.database">
-        <span>DB Latency</span>
-        <span>{{ data.checks.database.latency_ms }} ms</span>
-      </div>
-
-      <div class="flex justify-between" v-if="data.system">
-        <span>Event Loop Lag</span>
-        <span>{{ data.system.event_loop_lag_ms }} ms</span>
-      </div>
-
-      <div class="text-xs text-gray-400 text-center mt-4">
-        {{ data.timestamp }}
-      </div>
-
-    </div>
-
-    <div v-if="error" class="text-red-400 text-center">
-      ❌ Service unreachable
-    </div>
-
-    <div v-if="loading" class="text-gray-400 text-center">
-      Loading...
-    </div>
-
+  <div class="text-2xl font-bold mb-2" :class="statusColor(svc)">
+    {{ svc.statusText }}
   </div>
+
+  <div class="text-sm space-y-1">
+    <div>Latency: {{ svc.latency }} ms</div>
+    <div>Uptime: {{ svc.uptimePercent }}%</div>
+    <div>Checks: {{ svc.history.length }}</div>
+  </div>
+
+  <!-- mini history -->
+  <div class="flex gap-1 mt-3">
+    <div v-for="h in svc.history.slice(-20)"
+         :class="h === 'ok' ? 'bg-green-500' : h === 'degraded' ? 'bg-yellow-400' : 'bg-red-500'"
+         class="w-2 h-4 rounded">
+    </div>
+  </div>
+
+</div>
+
+</div>
 
 </div>
 
@@ -76,64 +53,98 @@
 const { createApp } = Vue;
 
 createApp({
-  data() {
-    return {
-      config: {},
-      data: null,
-      loading: true,
-      error: false
-    };
-  },
-
-  computed: {
-    statusText() {
-      if (this.error) return "DOWN";
-      if (!this.data) return "CHECKING";
-      return this.data.status.toUpperCase();
-    },
-    statusColor() {
-      if (this.error) return "text-red-500";
-      if (!this.data) return "text-gray-400";
-
-      switch (this.data.status) {
-        case "ok": return "text-green-500";
-        case "degraded": return "text-yellow-400";
-        case "fail": return "text-red-500";
-        default: return "text-gray-400";
-      }
-    }
-  },
-
-  methods: {
-    async loadConfig() {
-      const res = await fetch('/api/env');
-      this.config = await res.json();
-    },
-
-    async fetchStatus() {
-      if (!this.config.API_URL) return;
-
-      this.loading = true;
-      this.error = false;
-
-      try {
-        const res = await fetch(this.config.API_URL);
-        this.data = await res.json();
-      } catch (e) {
-        this.error = true;
-        this.data = null;
-      } finally {
-        this.loading = false;
-      }
-    }
-  },
-
-  async mounted() {
-    await this.loadConfig();
-    await this.fetchStatus();
-
-    setInterval(this.fetchStatus, this.config.REFRESH_INTERVAL || 30000);
+data() {
+  return {
+    config: {},
+    services: []
   }
+},
+
+methods: {
+
+async loadConfig() {
+  const res = await fetch('/api/env');
+  this.config = await res.json();
+
+  this.services = this.config.SERVICES.map(s => ({
+    ...s,
+    status: null,
+    latency: 0,
+    history: JSON.parse(localStorage.getItem(s.name) || "[]")
+  }));
+
+  Notification.requestPermission();
+},
+
+statusColor(svc) {
+  if (!svc.status) return "text-gray-400";
+  if (svc.status === "ok") return "text-green-500";
+  if (svc.status === "degraded") return "text-yellow-400";
+  return "text-red-500";
+},
+
+calculateUptime(history) {
+  if (!history.length) return 100;
+  const ok = history.filter(h => h === "ok").length;
+  return ((ok / history.length) * 100).toFixed(1);
+},
+
+alert(svc) {
+  if (Notification.permission === "granted") {
+    new Notification(`${svc.name} DOWN`, {
+      body: `Status: ${svc.status}`
+    });
+  }
+},
+
+async checkService(svc) {
+  const start = performance.now();
+
+  try {
+    const res = await fetch(svc.url);
+    const data = await res.json();
+
+    const latency = Math.round(performance.now() - start);
+
+    svc.status = data.status;
+    svc.latency = latency;
+
+    svc.history.push(data.status);
+    if (svc.history.length > 100) svc.history.shift();
+
+    localStorage.setItem(svc.name, JSON.stringify(svc.history));
+
+    svc.uptimePercent = this.calculateUptime(svc.history);
+
+    // ALERT CONDITIONS
+    if (data.status === "fail" || latency > this.config.ALERT_THRESHOLD_MS) {
+      this.alert(svc);
+    }
+
+  } catch (e) {
+    svc.status = "fail";
+    svc.latency = 0;
+
+    svc.history.push("fail");
+    this.alert(svc);
+  }
+
+  svc.statusText = svc.status?.toUpperCase() || "CHECKING";
+},
+
+async runChecks() {
+  await Promise.all(this.services.map(s => this.checkService(s)));
+}
+
+},
+
+async mounted() {
+  await this.loadConfig();
+  await this.runChecks();
+
+  setInterval(this.runChecks, this.config.REFRESH_INTERVAL);
+}
+
 }).mount("#app");
 </script>
 
