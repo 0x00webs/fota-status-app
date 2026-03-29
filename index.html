@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Status Dashboard</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+</head>
+
+<body class="bg-slate-900 text-white">
+
+<div id="app" class="min-h-screen flex items-center justify-center p-6">
+
+  <div class="bg-slate-800 rounded-2xl shadow-xl p-6 w-full max-w-md">
+
+    <h1 class="text-2xl font-bold text-center mb-4">
+      🚀 {{ config.APP_NAME || "Loading..." }}
+    </h1>
+
+    <div class="text-center mb-6">
+      <span class="text-3xl font-bold" :class="statusColor">
+        {{ statusText }}
+      </span>
+    </div>
+
+    <div v-if="data" class="space-y-2 text-sm">
+
+      <div class="flex justify-between">
+        <span>Uptime</span>
+        <span>{{ data.uptime_sec }}s</span>
+      </div>
+
+      <div class="flex justify-between">
+        <span>Database</span>
+        <span>{{ data.database }}</span>
+      </div>
+
+      <div class="flex justify-between">
+        <span>Memory</span>
+        <span>{{ data.memory?.rss_mb }} MB</span>
+      </div>
+
+      <div class="flex justify-between" v-if="data.checks?.database">
+        <span>DB Latency</span>
+        <span>{{ data.checks.database.latency_ms }} ms</span>
+      </div>
+
+      <div class="flex justify-between" v-if="data.system">
+        <span>Event Loop Lag</span>
+        <span>{{ data.system.event_loop_lag_ms }} ms</span>
+      </div>
+
+      <div class="text-xs text-gray-400 text-center mt-4">
+        {{ data.timestamp }}
+      </div>
+
+    </div>
+
+    <div v-if="error" class="text-red-400 text-center">
+      ❌ Service unreachable
+    </div>
+
+    <div v-if="loading" class="text-gray-400 text-center">
+      Loading...
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+const { createApp } = Vue;
+
+createApp({
+  data() {
+    return {
+      config: {},
+      data: null,
+      loading: true,
+      error: false
+    };
+  },
+
+  computed: {
+    statusText() {
+      if (this.error) return "DOWN";
+      if (!this.data) return "CHECKING";
+      return this.data.status.toUpperCase();
+    },
+    statusColor() {
+      if (this.error) return "text-red-500";
+      if (!this.data) return "text-gray-400";
+
+      switch (this.data.status) {
+        case "ok": return "text-green-500";
+        case "degraded": return "text-yellow-400";
+        case "fail": return "text-red-500";
+        default: return "text-gray-400";
+      }
+    }
+  },
+
+  methods: {
+    async loadConfig() {
+      const res = await fetch('/api/env');
+      this.config = await res.json();
+    },
+
+    async fetchStatus() {
+      if (!this.config.API_URL) return;
+
+      this.loading = true;
+      this.error = false;
+
+      try {
+        const res = await fetch(this.config.API_URL);
+        this.data = await res.json();
+      } catch (e) {
+        this.error = true;
+        this.data = null;
+      } finally {
+        this.loading = false;
+      }
+    }
+  },
+
+  async mounted() {
+    await this.loadConfig();
+    await this.fetchStatus();
+
+    setInterval(this.fetchStatus, this.config.REFRESH_INTERVAL || 30000);
+  }
+}).mount("#app");
+</script>
+
+</body>
+</html>
